@@ -32,7 +32,9 @@
 void unix_error(char *msg) /* Unix-style error */
 {
     fprintf(stderr, "%s: %s\n", msg, strerror(errno));
-    exit(0);
+    if (errno != EPIPE) {
+        exit(0);
+    }
 }
 /* $end unixerror */
 
@@ -846,7 +848,7 @@ void rio_readinitb(rio_t *rp, int fd)
  * rio_readnb - Robustly read n bytes (buffered)
  */
 /* $begin rio_readnb */
-ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n) 
+ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n) //사이즈별로 읽는다
 {
     size_t nleft = n;
     ssize_t nread;
@@ -868,7 +870,7 @@ ssize_t rio_readnb(rio_t *rp, void *usrbuf, size_t n)
  * rio_readlineb - Robustly read a text line (buffered)
  */
 /* $begin rio_readlineb */
-ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen) 
+ssize_t rio_readlineb(rio_t *rp, void *usrbuf, size_t maxlen) //한줄씩 읽는다
 {
     int n, rc;
     char c, *bufp = usrbuf;
@@ -997,28 +999,47 @@ int open_clientfd(char *hostname, char *port) {
 int open_listenfd(char *port) 
 {
     struct addrinfo hints, *listp, *p;
+    //addrinfo 구조체는 네트워크 주소 정보를 저장
+    //hints는 소켓 생성 시 필요한 힌트 정보를 설정
+    //listp는 getaddrinfo() 함수가 반환하는 가능한 서버 주소의 리스트를 가리킨다.
+    //p는 이 리스트를 탐색하는 포인터이다.
+
     int listenfd, rc, optval=1;
 
     /* Get a list of potential server addresses */
     memset(&hints, 0, sizeof(struct addrinfo));
+    //hints 구조체를 0으로 초기화한다.
     hints.ai_socktype = SOCK_STREAM;             /* Accept connections */
+    //소켓 타입을 TCP 연결을 위한 SOCK_STREAM으로 설정한다.
     hints.ai_flags = AI_PASSIVE | AI_ADDRCONFIG; /* ... on any IP address */
+    //AI_PASSIVE : 서버 소켓을 위한 설정으로, 모든 IP주소를 수락 할 수 있도록 준비한다.
+    //AI_ADDRCONFIG : 현재 시스템에 사용 가능한 IP 주소 구성에 따라 주소를 선택
     hints.ai_flags |= AI_NUMERICSERV;            /* ... using port number */
+
     if ((rc = getaddrinfo(NULL, port, &hints, &listp)) != 0) {
+    //getaddrinfo()는 설정된 힌트에 맞는 서버 주소 리스트를 생성한다.
+    //이 함수가 성공적으로 실행되면 listp가 유효한 서버 주소 리스트를 가리킨다.
         fprintf(stderr, "getaddrinfo failed (port %s): %s\n", port, gai_strerror(rc));
         return -2;
     }
 
+    //소켓 생성 및 바인딩 과정
+    //리스트를 탐색하며 바인딩 할 수 있는 주소를 찾는다.
     /* Walk the list for one that we can bind to */
     for (p = listp; p; p = p->ai_next) {
         /* Create a socket descriptor */
+        //socket()함수를 호출하여 소켓 디스크립터를 생성한다. socket()의 매개변수로는 주소 패밀리, 소켓 타입, 프로토콜이 들어간다.
         if ((listenfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0) 
             continue;  /* Socket failed, try the next */
 
+        //setsockopt()는 SO_REUSEADDR 옵션을 설정하여 "Address already in use" 오류를 방지한다.
+        //이 옵션은 서버가 종료된 후 바로 재시작할 때 발생하는 주소 재사용 문제를 해결한다.
         /* Eliminates "Address already in use" error from bind */
         setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR,    //line:netp:csapp:setsockopt
                    (const void *)&optval , sizeof(int));
 
+        //bind()는 생성된 소켓을 특정 주소와 포트에 바인딩한다.
+        //바인딩이 성공하면 break로 루프를 종료한다.
         /* Bind the descriptor to the address */
         if (bind(listenfd, p->ai_addr, p->ai_addrlen) == 0)
             break; /* Success */
@@ -1034,6 +1055,8 @@ int open_listenfd(char *port)
     if (!p) /* No address worked */
         return -1;
 
+    //바인딩된 소켓을 리스닝 소켓으로 만들어, 클라이언트의 연결 요청을 수락할 준비를 한다.
+    //LISTENQ는 대기할 수 있는 연결 요청의 최대 개수를 설정한다.
     /* Make it a listening socket ready to accept connection requests */
     if (listen(listenfd, LISTENQ) < 0) {
         close(listenfd);

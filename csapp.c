@@ -24,6 +24,10 @@
 /* $begin csapp.c */
 #include "csapp.h"
 
+#include <unistd.h>
+#include <errno.h>
+#include <stdio.h>
+
 /************************** 
  * Error-handling functions
  **************************/
@@ -32,7 +36,8 @@
 void unix_error(char *msg) /* Unix-style error */
 {
     fprintf(stderr, "%s: %s\n", msg, strerror(errno));
-    exit(0);
+    if (errno != EPIPE)
+        exit(0);
 }
 /* $end unixerror */
 
@@ -335,6 +340,8 @@ ssize_t Read(int fd, void *buf, size_t count)
 	unix_error("Read error");
     return rc;
 }
+
+
 
 ssize_t Write(int fd, const void *buf, size_t count) 
 {
@@ -768,9 +775,36 @@ ssize_t rio_readn(int fd, void *usrbuf, size_t n)
 }
 /* $end rio_readn */
 
+// // 수정된 rio_write 함수
+// ssize_t rio_write(int fd, void *usrbuf, size_t n) {
+//     ssize_t nwritten;
+//     ssize_t total_written = 0;
+//     char *bufp = usrbuf;
+
+//     while (n > 0) {
+//         // write 호출
+//         if ((nwritten = write(fd, bufp, n)) <= 0) {
+//             if (errno == EINTR) {  // interrupted by signal handler return
+//                 nwritten = 0;  // call write() again
+//             } else if (errno == EPIPE) {
+//                 // SIGPIPE 에러 처리
+//                 fprintf(stderr, "SIGPIPE received: Connection broken\n");
+//                 return -1;  // 필요한 경우 다른 에러 처리 로직 추가 가능
+//             } else {
+//                 return -1;  // 다른 에러 발생
+//             }
+//         }
+//         n -= nwritten;
+//         bufp += nwritten;
+//         total_written += nwritten;
+//     }
+//     return total_written;
+// }
+
+
 /*
- * rio_writen - Robustly write n bytes (unbuffered)
- */
+* rio_writen - Robustly write n bytes (unbuffered)
+*/
 /* $begin rio_writen */
 ssize_t rio_writen(int fd, void *usrbuf, size_t n) 
 {
@@ -779,14 +813,15 @@ ssize_t rio_writen(int fd, void *usrbuf, size_t n)
     char *bufp = usrbuf;
 
     while (nleft > 0) {
-	if ((nwritten = write(fd, bufp, nleft)) <= 0) {
-	    if (errno == EINTR)  /* Interrupted by sig handler return */
-		nwritten = 0;    /* and call write() again */
-	    else
-		return -1;       /* errno set by write() */
-	}
-	nleft -= nwritten;
-	bufp += nwritten;
+    if ((nwritten = write(fd, bufp, nleft)) <= 0) {
+        if (errno == EINTR) {  /* Interrupted by sig handler return */
+            nwritten = 0;   /* and call write() again */
+        } else {
+            return -1;       /* errno set by write() */
+            }
+        }
+        nleft -= nwritten;
+        bufp += nwritten;
     }
     return n;
 }
